@@ -1,0 +1,6 @@
+#!/bin/bash
+
+echo "Installing custom CloudPanel UI Mod"
+cp -r /home/clp/htdocs/app_mod/* /home/clp/htdocs/app/
+chown -R clp:clp /home/clp/htdocs/app/
+rm -rf /home/clp/htdocs/app/files/var/cache/prod/twig
