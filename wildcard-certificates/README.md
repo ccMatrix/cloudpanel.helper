@@ -10,7 +10,7 @@ Copy the file `connect-certificates` to `/usr/local/bin/` and change the variabl
 
 ## Setup acme.sh
 
-Install and setup acme.sh to obtain certificates. Use the command `/usr/local/bin/connect-certificates && service nginx force-reload` to connect the new certificates and reload nginx after a new Let's Encrypt certificate was obtained.
+Install and setup [acme.sh](https://github.com/acmesh-official/acme.sh) to obtain certificates. Use the command `/usr/local/bin/connect-certificates && service nginx force-reload` to connect the new certificates and reload nginx after a new Let's Encrypt certificate was obtained.
 
 ## Setup incron
 
