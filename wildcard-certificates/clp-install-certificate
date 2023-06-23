@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+# Function to extract root domain from a given domain
+get_root_domain() {
+  domain="$1"
+  root_domain=$(echo "$domain" | awk -F'.' '{print $(NF-1) FS $NF}')
+  echo "$root_domain"
+}
+
+# Check if a parameter is provided
+if [ $# -eq 1 ]; then
+  # If a parameter is provided, extract the domain from the filename
+  filename="$1"
+  domain="${filename%.conf}"
+  domains="$domain"
+else
+  # If no parameter is provided, retrieve domains from the database
+  # SQLite query
+  query="SELECT domain_name FROM site WHERE domain_name LIKE '%htpc.zone';"
+
+  # Execute SQLite query and retrieve domains
+  domains=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "$query")
+fi
+
+for domain in $domains; do
+  root_domain=$(get_root_domain "$domain")
+  certificate=/root/.acme.sh/$root_domain/fullchain.cer
+  private_key=/root/.acme.sh/$root_domain/htpc.zone.key
+
+  # Execute the command for each domain
+  command="/usr/bin/clpctl site:install:certificate --domainName=$domain --privateKey=$private_key --certificate=$certificate"
+  echo "Executing command for domain: $domain"
+  $command
+done
