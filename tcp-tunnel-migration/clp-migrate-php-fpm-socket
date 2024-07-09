@@ -1,5 +1,13 @@
 #!/bin/bash
 
+# Log file
+LOG_FILE="/var/log/migrate_sockets.log"
+
+# Function to log messages
+log_message() {
+  echo "$(date +"%Y-%m-%d %H:%M:%S") - $1" | tee -a $LOG_FILE
+}
+
 # Get a list of available domains
 domains=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT id, domain_name, INSTR(vhost_template, 'fastcgi_pass unix') as hasSocket FROM site WHERE type = 'php'")
 
@@ -8,7 +16,7 @@ readarray -t domain_array <<<"$domains"
 
 # Check if the domain array is empty
 if [ -z "$domains" ]; then
-  echo "No PHP sites found on your server."
+  log_message "No PHP sites found on your server."
   exit 1
 fi
 
@@ -24,27 +32,28 @@ done
 read -p "Please pick a domain by entering its number: " domain_number
 
 if [ -z "$domain_number" ]; then
-  echo "No site selected."
+  log_message "No site selected."
   exit 2
 fi
 
 # Check if the input is numeric
 if ! [[ $domain_number =~ ^[0-9]+$ ]]; then
-  echo "Invalid input. Enter only numbers to pick the site you want to migrate."
+  log_message "Invalid input. Enter only numbers to pick the site you want to migrate."
   exit 3
 fi
+
 
 # Get the selected domain id and name
 site_id=$(echo "${domain_array[$((domain_number - 1))]}" | cut -d "|" -f 1)
 domain_name=$(echo "${domain_array[$((domain_number - 1))]}" | cut -d "|" -f 2)
 
 if [ -z "$domain_name" ]; then
-  echo "Selected site does not exist."
+  log_message "Selected site does not exist."
   exit 4
 fi
 
-echo "----------------------------------------"
-echo "Starting migration of $domain_name"
+log_message "----------------------------------------"
+log_message "Starting migration of $domain_name"
 
 # Get the PHP version from the php_settings table for the selected domain
 php_version=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT php_version FROM php_settings WHERE site_id = $site_id")
@@ -52,9 +61,10 @@ php_version=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT php_version FROM 
 # Load and display the pool configuration content
 pool_config_file="/etc/php/$php_version/fpm/pool.d/$domain_name.conf"
 if [ -f "$pool_config_file" ]; then
-  echo "Found pool Configuration for Domain: $domain_name"
+  log_message "Found pool configuration for domain: $domain_name"
 else
-  echo "Error: Pool configuration file not found!"
+  log_message "Error: Pool configuration file not found!"
+  exit 5
 fi
 
 # Extract user and group values from the pool configuration file
@@ -62,6 +72,9 @@ user=$(awk -F' = ' '/user/ {print $2}' "$pool_config_file")
 group=$(awk -F' = ' '/group/ {print $2}' "$pool_config_file")
 
 sock_path="/var/run/php/${domain_name}.sock"
+
+# Create a backup of the pool configuration file
+cp "$pool_config_file" "$pool_config_file.bak"
 
 # Create a temporary file
 tmp_file=$(mktemp)
@@ -84,27 +97,53 @@ done < $pool_config_file
 # Replace the original file with the temporary file
 mv "$tmp_file" $pool_config_file
 
-# Display the updated pool configuration
-echo "Updated Pool Configuration in $pool_config_file"
+log_message "Updated pool configuration in $pool_config_file"
 
 # Process the vhost template in the sqlite db
 vhost_template=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT vhost_template FROM site WHERE id = $site_id")
 updated_vhost_template=$(echo "$vhost_template" | sed "s/fastcgi_pass 127.0.0.1:{{php_fpm_port}}/fastcgi_pass unix:\/var\/run\/php\/$domain_name.sock;/")
 escaped_string="${updated_vhost_template//\'/\'\'}"
 sqlite3 /home/clp/htdocs/app/data/db.sq3 "UPDATE site SET vhost_template = '$escaped_string' WHERE id = $site_id;"
-echo "Updatesd site vhost in CloudPanel database"
+if [[ $? -eq 0 ]]; then
+  log_message "Updated site vhost in CloudPanel database"
+else
+  log_message "Failed to update site vhost in CloudPanel database"
+  exit 6
+fi
 
 # Replace the line in the NGINX configuration file
 nginx_config_file="/etc/nginx/sites-enabled/$domain_name.conf"
+# Create a backup of the NGINX configuration file
 if [ -f "$nginx_config_file" ]; then
+  cp "$nginx_config_file" "$nginx_config_file.bak"
   sed -i "s/fastcgi_pass 127.0.0.1:[0-9]\+;/fastcgi_pass unix:\/var\/run\/php\/$domain_name.sock;/" "$nginx_config_file"
-  echo "Successfully updated $nginx_config_file"
+  if [[ $? -eq 0 ]]; then
+    log_message "Successfully updated $nginx_config_file"
+  else
+    log_message "Failed to update $nginx_config_file"
+    exit 7
+  fi
 else
-  echo "Error: NGINX configuration file $nginx_config_file not found"
+  log_message "Error: NGINX configuration file $nginx_config_file not found"
+  exit 8
 fi
 
 # Restart the PHP-FPM service based on the PHP version
 service_name="php$php_version-fpm.service"
 systemctl restart "$service_name"
+if [[ $? -eq 0 ]]; then
+  log_message "Restarted PHP-FPM service $service_name"
+else
+  log_message "Failed to restart PHP-FPM service $service_name"
+  exit 9
+fi
 
 systemctl reload nginx
+if [[ $? -eq 0 ]]; then
+  log_message "Reloaded NGINX service"
+else
+  log_message "Failed to reload NGINX service"
+  exit 10
+fi
+
+log_message "Migration completed for $domain_name"
