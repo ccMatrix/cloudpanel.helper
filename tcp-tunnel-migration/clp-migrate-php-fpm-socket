@@ -1,5 +1,4 @@
 #!/bin/bash
-#!/bin/bash
 
 # Get a list of available domains
 domains=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT id, domain_name, INSTR(vhost_template, 'fastcgi_pass unix') as hasSocket FROM site WHERE type = 'php'")
