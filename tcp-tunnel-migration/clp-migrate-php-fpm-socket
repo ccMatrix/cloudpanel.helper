@@ -1,24 +1,40 @@
 #!/bin/bash
+#!/bin/bash
 
 # Get a list of available domains
-domains=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT id, domain_name FROM site WHERE type = 'php'")
+domains=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT id, domain_name, INSTR(vhost_template, 'fastcgi_pass unix') as hasSocket FROM site WHERE type = 'php'")
 
 # Convert the list of domains into an array
 readarray -t domain_array <<<"$domains"
 
+# Check if the domain array is empty
+if [ -z "$domains" ]; then
+  echo "No PHP sites found on your server."
+  exit 1
+fi
+
 # Create a dialog menu for selecting a domain
-echo "Available domains:"
+echo "Available PHP sites:"
 for ((i=0; i<${#domain_array[@]}; i++)); do
   domain_id=$(echo "${domain_array[i]}" | cut -d "|" -f 1)
   domain_name=$(echo "${domain_array[i]}" | cut -d "|" -f 2)
-  echo "$(($i + 1)). $domain_name"
+  hasSocket=$(echo "${domain_array[i]}" | cut -d "|" -f 3)
+  echo "$(($i + 1)). $domain_name ($([ "$hasSocket" -eq 0 ] && echo 'tcp' || echo 'socket'))"
 done
 
 read -p "Please pick a domain by entering its number: " domain_number
 
+if [ -z "$domain_number" ]; then
+  echo "No site selected."
+  exit 2
+fi
+
 # Get the selected domain id and name
 site_id=$(echo "${domain_array[$((domain_number - 1))]}" | cut -d "|" -f 1)
 domain_name=$(echo "${domain_array[$((domain_number - 1))]}" | cut -d "|" -f 2)
+
+echo "----------------------------------------"
+echo "Starting migration of $domain_name"
 
 # Get the PHP version from the php_settings table for the selected domain
 php_version=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT php_version FROM php_settings WHERE site_id = $site_id")
@@ -26,11 +42,9 @@ php_version=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT php_version FROM 
 # Load and display the pool configuration content
 pool_config_file="/etc/php/$php_version/fpm/pool.d/$domain_name.conf"
 if [ -f "$pool_config_file" ]; then
-  echo "Pool Configuration for Domain: $domain_name"
-  echo "----------------------------------------------"
+  echo "Found pool Configuration for Domain: $domain_name"
 else
   echo "Error: Pool configuration file not found!"
-  exit
 fi
 
 # Extract user and group values from the pool configuration file
@@ -57,8 +71,6 @@ while IFS= read -r line; do
   fi
 done < $pool_config_file
 
-cat $tmp_file
-
 # Replace the original file with the temporary file
 mv "$tmp_file" $pool_config_file
 
@@ -68,7 +80,8 @@ echo "Updated Pool Configuration in $pool_config_file"
 # Process the vhost template in the sqlite db
 vhost_template=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT vhost_template FROM site WHERE id = $site_id")
 updated_vhost_template=$(echo "$vhost_template" | sed "s/fastcgi_pass 127.0.0.1:{{php_fpm_port}}/fastcgi_pass unix:\/var\/run\/php\/$domain_name.sock;/")
-sqlite3 /home/clp/htdocs/app/data/db.sq3 "UPDATE site SET vhost_template = '$updated_vhost_template' WHERE id = $site_id;"
+escaped_string="${updated_vhost_template//\'/\'\'}"
+sqlite3 /home/clp/htdocs/app/data/db.sq3 "UPDATE site SET vhost_template = '$escaped_string' WHERE id = $site_id;"
 echo "Updatesd site vhost in CloudPanel database"
 
 # Replace the line in the NGINX configuration file
@@ -78,7 +91,6 @@ if [ -f "$nginx_config_file" ]; then
   echo "Successfully updated $nginx_config_file"
 else
   echo "Error: NGINX configuration file $nginx_config_file not found"
-  exit
 fi
 
 # Restart the PHP-FPM service based on the PHP version
@@ -86,4 +98,3 @@ service_name="php$php_version-fpm.service"
 systemctl restart "$service_name"
 
 systemctl reload nginx
-
