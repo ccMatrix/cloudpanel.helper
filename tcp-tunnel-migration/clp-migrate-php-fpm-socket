@@ -63,6 +63,8 @@ if [ ! -f "$pool_config_file" ]; then
   exit 5
 fi
 
+log_message "Found pool configuration for domain: $domain_name"
+
 # Extract user and group values from the pool configuration file
 user=$(awk -F' = ' '/^user/ {print $2}' "$pool_config_file")
 group=$(awk -F' = ' '/^group/ {print $2}' "$pool_config_file")
@@ -93,19 +95,23 @@ mv "$tmp_file" "$pool_config_file"
 
 log_message "Updated pool configuration in $pool_config_file"
 
+escaped_sock_path=$(echo $sock_path | sed 's/\//\\\//g')
+
 # Update vhost template in the database
 vhost_template=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "SELECT vhost_template FROM site WHERE id = $site_id")
-updated_vhost_template=$(echo "$vhost_template" | sed "s/fastcgi_pass 127.0.0.1:{{php_fpm_port}}/fastcgi_pass unix:$sock_path;/")
+updated_vhost_template=$(echo "$vhost_template" | sed "s/fastcgi_pass 127.0.0.1:{{php_fpm_port}}/fastcgi_pass unix:$escaped_sock_path;/")
 escaped_string="${updated_vhost_template//\'/\'\'}"
 sqlite3 /home/clp/htdocs/app/data/db.sq3 "UPDATE site SET vhost_template = '$escaped_string' WHERE id = $site_id;"
 check_success "Failed to update site vhost in CloudPanel database."
+log_message "Updated site vhost in CloudPanel database"
 
 # Update NGINX configuration
 nginx_config_file="/etc/nginx/sites-enabled/$domain_name.conf"
 if [ -f "$nginx_config_file" ]; then
   cp "$nginx_config_file" "$nginx_config_file.bak"
-  sed -i "s/fastcgi_pass 127.0.0.1:[0-9]\+;/fastcgi_pass unix:$sock_path;/" "$nginx_config_file"
+  sed -i "s/fastcgi_pass 127.0.0.1:[0-9]\+;/fastcgi_pass unix:$escaped_sock_path;/" "$nginx_config_file"
   check_success "Failed to update $nginx_config_file"
+  log_message "Successfully updated $nginx_config_file"
 else
   log_message "Error: NGINX configuration file $nginx_config_file not found"
   exit 8
@@ -114,8 +120,10 @@ fi
 # Restart services
 systemctl restart "php$php_version-fpm.service"
 check_success "Failed to restart PHP-FPM service."
+log_message "Restarted PHP-FPM service $service_name"
 
 systemctl reload nginx
 check_success "Failed to reload NGINX service."
+log_message "Reloaded NGINX service"
 
 log_message "Migration completed for $domain_name"
