@@ -8,9 +8,10 @@ For example if you want to overwrite the file
 `/home/clp/htdocs/app/files/templates/Frontend/Dashboard/Partial/information.html.twig` you would create a file
 `/home/clp/htdocs/app_mod/files/templates/Frontend/Dashboard/Partial/information.html.twig`.
 
-## Copy the script
+## Install the script
 
 Copy the file `clp-install-mod` to `/usr/local/bin/`
+Make the file executable uaing `chmod +x /usr/local/bin/clp-install-mod`.
 
 ## Assign alias
 
