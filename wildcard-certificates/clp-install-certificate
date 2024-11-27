@@ -16,7 +16,7 @@ if [ $# -eq 1 ]; then
 else
   # If no parameter is provided, retrieve domains from the database
   # SQLite query
-  query="SELECT domain_name FROM site WHERE domain_name LIKE '%htpc.zone';"
+  query="SELECT domain_name FROM site WHERE domain_name;"
 
   # Execute SQLite query and retrieve domains
   domains=$(sqlite3 /home/clp/htdocs/app/data/db.sq3 "$query")
