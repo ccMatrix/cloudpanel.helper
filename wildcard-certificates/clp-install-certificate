@@ -25,7 +25,7 @@ fi
 for domain in $domains; do
   root_domain=$(get_root_domain "$domain")
   certificate=/root/.acme.sh/$root_domain/fullchain.cer
-  private_key=/root/.acme.sh/$root_domain/htpc.zone.key
+  private_key=/root/.acme.sh/$root_domain/$root_domain.key
 
   # Execute the command for each domain
   command="/usr/bin/clpctl site:install:certificate --domainName=$domain --privateKey=$private_key --certificate=$certificate"
